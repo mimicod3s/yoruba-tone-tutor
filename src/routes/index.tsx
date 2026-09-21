@@ -7,14 +7,15 @@ import { PitchLane } from "@/components/PitchLane";
 import { Button } from "@/components/ui/button";
 import { usePitchRecorder } from "@/hooks/use-pitch-recorder";
 import {
-  AUTO_PROFILE,
+  EMPTY_STORE,
   METHODS,
+  activeProfile,
   isCalibrated,
-  loadProfile,
-  saveProfile,
-  type CalibrationProfile,
+  loadStore,
+  saveStore,
+  type CalibrationStore,
 } from "@/lib/calibration";
-import { evaluateContour, type Evaluation } from "@/lib/evaluate-tones";
+import { evaluateContour, type Evaluation, type PitchSample } from "@/lib/evaluate-tones";
 import { playTonePattern } from "@/lib/tone-audio";
 import { DECK, TONE_INFO, type Tone, type ToneWord } from "@/lib/tone-deck";
 import { cn } from "@/lib/utils";
