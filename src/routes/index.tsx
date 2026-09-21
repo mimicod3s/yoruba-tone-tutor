@@ -7,14 +7,15 @@ import { PitchLane } from "@/components/PitchLane";
 import { Button } from "@/components/ui/button";
 import { usePitchRecorder } from "@/hooks/use-pitch-recorder";
 import {
-  AUTO_PROFILE,
+  EMPTY_STORE,
   METHODS,
+  activeProfile,
   isCalibrated,
-  loadProfile,
-  saveProfile,
-  type CalibrationProfile,
+  loadStore,
+  saveStore,
+  type CalibrationStore,
 } from "@/lib/calibration";
-import { evaluateContour, type Evaluation } from "@/lib/evaluate-tones";
+import { evaluateContour, type Evaluation, type PitchSample } from "@/lib/evaluate-tones";
 import { playTonePattern } from "@/lib/tone-audio";
 import { DECK, TONE_INFO, type Tone, type ToneWord } from "@/lib/tone-deck";
 import { cn } from "@/lib/utils";
@@ -56,27 +57,47 @@ function ToneChip({ tone }: { tone: Tone }) {
   );
 }
 
+type Attempt = {
+  id: number;
+  at: number;
+  score: number;
+  evaluation: Evaluation;
+  samples: PitchSample[];
+  baselineHz: number;
+};
+
+const MAX_ATTEMPTS = 3;
+
 function Index() {
   const [index, setIndex] = useState(0);
-  const [result, setResult] = useState<Evaluation | null>(null);
   const [history, setHistory] = useState<Record<string, number>>({});
-  const [profile, setProfile] = useState<CalibrationProfile>(AUTO_PROFILE);
+  const [attempts, setAttempts] = useState<Record<string, Attempt[]>>({});
+  const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
+  const [store, setStore] = useState<CalibrationStore>(EMPTY_STORE);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const frozen = useRef(false);
+  const viewSamplesRef = useRef<PitchSample[]>([]);
+  const viewBaselineRef = useRef<number | null>(null);
 
   useEffect(() => {
-    setProfile(loadProfile());
+    setStore(loadStore());
   }, []);
 
-  const handleSaveProfile = (next: CalibrationProfile) => {
-    setProfile(next);
-    saveProfile(next);
-    setResult(null);
+  const profile = useMemo(() => activeProfile(store), [store]);
+
+  const handleStoreChange = (next: CalibrationStore) => {
+    setStore(next);
+    saveStore(next);
   };
 
   const word: ToneWord = DECK[index]!;
   const { status, level, liveHz, samplesRef, baselineRef, start, stop } = usePitchRecorder();
   const listening = status === "listening";
+
+  const wordAttempts = attempts[word.id] ?? [];
+  const current =
+    selectedAttempt != null ? (wordAttempts.find((a) => a.id === selectedAttempt) ?? null) : null;
+  const result = current?.evaluation ?? null;
 
   const groups = useMemo(() => {
     const map = new Map<string, ToneWord[]>();
@@ -84,27 +105,55 @@ function Index() {
     return [...map.entries()];
   }, []);
 
+  const showAttempt = (attempt: Attempt) => {
+    viewSamplesRef.current = attempt.samples;
+    viewBaselineRef.current = attempt.baselineHz;
+    frozen.current = true;
+    setSelectedAttempt(attempt.id);
+  };
+
   const handleStart = async () => {
-    setResult(null);
+    setSelectedAttempt(null);
     frozen.current = false;
     await start();
   };
 
   const handleStop = () => {
-    const samples = stop();
+    const samples = [...stop()];
     frozen.current = true;
     const evaluation = evaluateContour(samples, word.tones, profile);
-    setResult(evaluation);
-    if (evaluation.ok) {
-      setHistory((h) => ({ ...h, [word.id]: Math.max(h[word.id] ?? 0, evaluation.score) }));
+    if (!evaluation.ok) {
+      viewSamplesRef.current = samples;
+      viewBaselineRef.current = null;
+      setAttempts((a) => ({ ...a }));
+      setSelectedAttempt(null);
+      setFailed(evaluation);
+      return;
     }
+    setFailed(null);
+    const attempt: Attempt = {
+      id: Date.now(),
+      at: Date.now(),
+      score: evaluation.score,
+      evaluation,
+      samples,
+      baselineHz: evaluation.baselineHz,
+    };
+    setAttempts((a) => ({ ...a, [word.id]: [...(a[word.id] ?? []), attempt].slice(-MAX_ATTEMPTS) }));
+    setHistory((h) => ({ ...h, [word.id]: Math.max(h[word.id] ?? 0, evaluation.score) }));
+    showAttempt(attempt);
   };
+
+  const [failed, setFailed] = useState<Evaluation | null>(null);
 
   const pick = (i: number) => {
     if (listening) stop();
     frozen.current = false;
     setIndex(i);
-    setResult(null);
+    setSelectedAttempt(null);
+    setFailed(null);
+    viewSamplesRef.current = [];
+    viewBaselineRef.current = null;
   };
 
   const attempted = Object.keys(history).length;
@@ -167,7 +216,11 @@ function Index() {
               Judging each attempt against itself — calibrate for sharper scoring on all-low or all-high words.
             </span>
           )}
-          <span className="ml-auto text-xs font-semibold text-primary">Change</span>
+          <span className="text-xs text-muted-foreground">
+            Saved: {METHODS.english.title} {store.profiles.english ? "✓" : "—"} · {METHODS.melody.title}{" "}
+            {store.profiles.melody ? "✓" : "—"}
+          </span>
+          <span className="ml-auto text-xs font-semibold text-primary">Switch</span>
         </button>
 
         {/* Word card */}
@@ -209,11 +262,42 @@ function Index() {
           <div className="mt-6">
             <PitchLane
               tones={word.tones}
-              samplesRef={samplesRef}
-              baselineRef={baselineRef}
+              samplesRef={listening ? samplesRef : viewSamplesRef}
+              baselineRef={listening ? baselineRef : viewBaselineRef}
               active={listening || (frozen.current && !!result?.ok)}
             />
           </div>
+
+          {wordAttempts.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                Recent attempts · {word.word}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Recent attempts">
+                {wordAttempts.map((a, i) => {
+                  const isLatest = i === wordAttempts.length - 1;
+                  const selected = a.id === selectedAttempt;
+                  return (
+                    <button
+                      key={a.id}
+                      aria-pressed={selected}
+                      onClick={() => showAttempt(a)}
+                      className={cn(
+                        "rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                        selected
+                          ? "border-primary bg-primary/15 text-primary"
+                          : "border-border bg-card/60 text-muted-foreground hover:border-primary/50",
+                      )}
+                    >
+                      Attempt {i + 1} {isLatest ? "(latest: " : "("}
+                      {a.score}%)
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
 
           <div className="mt-5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:justify-between">
             <div className="min-w-0">
@@ -249,9 +333,9 @@ function Index() {
             </p>
           )}
 
-          {result && !result.ok && (
+          {failed && !failed.ok && (
             <p className="mt-4 rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm text-muted-foreground">
-              {result.message}
+              {failed.message}
             </p>
           )}
 
@@ -380,8 +464,8 @@ function Index() {
       <CalibrationDialog
         open={calibrationOpen}
         onOpenChange={setCalibrationOpen}
-        profile={profile}
-        onSave={handleSaveProfile}
+        store={store}
+        onChange={handleStoreChange}
       />
     </main>
   );

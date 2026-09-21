@@ -15,8 +15,10 @@ import {
   analyseCalibration,
   AUTO_PROFILE,
   METHODS,
+  withSavedProfile,
   type CalibrationMethod,
   type CalibrationProfile,
+  type CalibrationStore,
 } from "@/lib/calibration";
 import { playSpeechGuide, playTwinkleGuide } from "@/lib/tone-audio";
 import { cn } from "@/lib/utils";
@@ -24,8 +26,8 @@ import { cn } from "@/lib/utils";
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  profile: CalibrationProfile;
-  onSave: (profile: CalibrationProfile) => void;
+  store: CalibrationStore;
+  onChange: (store: CalibrationStore) => void;
 };
 
 type Phase = "idle" | "recording" | "review";
@@ -38,8 +40,18 @@ const ICONS: Record<CalibrationMethod, typeof Mic> = {
   auto: Sparkles,
 };
 
-export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props) {
-  const [method, setMethod] = useState<CalibrationMethod>(profile.method);
+const timeAgo = (ts: number) => {
+  if (!ts) return "";
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+};
+
+export function CalibrationDialog({ open, onOpenChange, store, onChange }: Props) {
+  const [method, setMethod] = useState<CalibrationMethod>(store.active);
   const [phase, setPhase] = useState<Phase>("idle");
   const [remaining, setRemaining] = useState(0);
   const [bands, setBands] = useState<{ low: number; mid: number; high: number } | null>(null);
@@ -52,15 +64,20 @@ export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props
   const stopRef = useRef<() => void>(() => {});
 
   const config = METHODS[method];
+  const saved = method === "auto" ? null : store.profiles[method];
+
+  const reset = () => {
+    setPhase("idle");
+    setBands(null);
+    setPending(null);
+    setError(null);
+    setRange(null);
+  };
 
   useEffect(() => {
     if (open) {
-      setMethod(profile.method);
-      setPhase("idle");
-      setBands(null);
-      setPending(null);
-      setError(null);
-      setRange(null);
+      setMethod(store.active);
+      reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -124,14 +141,8 @@ export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props
 
   useEffect(() => clearTimer, []);
 
-  const saveAuto = () => {
-    onSave({ ...AUTO_PROFILE, capturedAt: Date.now() });
-    onOpenChange(false);
-  };
-
-  const commit = () => {
-    if (!pending) return;
-    onSave(pending);
+  const applyProfile = (profile: CalibrationProfile) => {
+    onChange(withSavedProfile(store, profile));
     onOpenChange(false);
   };
 
@@ -143,49 +154,61 @@ export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props
     onOpenChange(next);
   };
 
+  const canApplySaved = !!saved && store.active !== method;
+  const primaryDisabled = method === "auto" ? false : !pending && !canApplySaved;
+
   return (
     <Dialog open={open} onOpenChange={closeAndReset}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle style={{ fontFamily: "var(--font-display)" }}>Calibrate your voice</DialogTitle>
           <DialogDescription>
-            Teach the app where your low, mid and high tones sit. Try both methods and compare which scores your
-            speech more accurately.
+            Each method keeps its own saved profile, so you can switch between them any time and compare which scores
+            your speech more accurately.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-2 sm:grid-cols-3">
           {METHOD_ORDER.map((m) => {
             const Icon = ICONS[m];
-            const active = m === method;
+            const selected = m === method;
+            const p = m === "auto" ? null : store.profiles[m];
             return (
               <button
                 key={m}
+                aria-pressed={selected}
                 onClick={() => {
                   if (status === "listening") {
                     clearTimer();
                     stop();
                   }
                   setMethod(m);
-                  setPhase("idle");
-                  setBands(null);
-                  setPending(null);
-                  setError(null);
-                  setRange(null);
+                  reset();
                 }}
                 className={cn(
                   "rounded-2xl border p-3 text-left transition-colors",
-                  active ? "border-primary bg-primary/10" : "border-border bg-card/60 hover:border-primary/50",
+                  selected ? "border-primary bg-primary/10" : "border-border bg-card/60 hover:border-primary/50",
                 )}
               >
                 <div className="flex items-center gap-2">
                   <Icon className="h-4 w-4 shrink-0 text-primary" />
                   <span className="truncate text-sm font-semibold">{METHODS[m].title}</span>
-                  {profile.method === m && (
+                  {store.active === m && (
                     <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase text-accent">active</span>
                   )}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">{METHODS[m].subtitle}</p>
+                <p className="mt-2 text-xs font-semibold">
+                  {m === "auto" ? (
+                    <span className="text-muted-foreground">No recording needed</span>
+                  ) : p ? (
+                    <span className="text-accent">
+                      Calibrated at {Math.round(p.midHz ?? 0)} Hz · {timeAgo(p.capturedAt)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Not calibrated yet</span>
+                  )}
+                </p>
               </button>
             );
           })}
@@ -243,9 +266,22 @@ export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props
                 onClick={phase === "recording" ? finish : begin}
               >
                 {phase === "recording" ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                {phase === "recording" ? "Stop now" : phase === "review" ? "Record again" : "Start recording"}
+                {phase === "recording"
+                  ? "Stop now"
+                  : phase === "review"
+                    ? "Record again"
+                    : saved
+                      ? "Re-record"
+                      : "Start recording"}
               </Button>
             </div>
+          )}
+
+          {saved && phase === "idle" && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Saved bands: Low {Math.round(saved.lowHz ?? 0)} Hz · Mid {Math.round(saved.midHz ?? 0)} Hz · High{" "}
+              {Math.round(saved.highHz ?? 0)} Hz. Switch to it without re-recording, or record again to replace it.
+            </p>
           )}
         </div>
 
@@ -278,8 +314,7 @@ export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props
 
         <DialogFooter className="gap-2 sm:justify-between">
           <p className="text-xs text-muted-foreground">
-            Active profile: <span className="font-semibold text-foreground">{METHODS[profile.method].title}</span>
-            {profile.midHz ? ` · mid ${Math.round(profile.midHz)} Hz` : ""}
+            Active profile: <span className="font-semibold text-foreground">{METHODS[store.active].title}</span>
           </p>
           <div className="flex gap-2">
             {method !== "auto" && phase === "review" && (
@@ -287,9 +322,23 @@ export function CalibrationDialog({ open, onOpenChange, profile, onSave }: Props
                 <RotateCcw className="h-4 w-4" /> Retry
               </Button>
             )}
-            <Button className="gap-2" disabled={method !== "auto" && !pending} onClick={method === "auto" ? saveAuto : commit}>
+            <Button
+              className="gap-2"
+              disabled={primaryDisabled}
+              onClick={() => {
+                if (method === "auto") applyProfile({ ...AUTO_PROFILE, capturedAt: Date.now() });
+                else if (pending) applyProfile(pending);
+                else if (saved) applyProfile(saved);
+              }}
+            >
               <Check className="h-4 w-4" />
-              {method === "auto" ? "Use relative mode" : "Save calibration"}
+              {method === "auto"
+                ? "Use relative mode"
+                : pending
+                  ? "Save & use calibration"
+                  : canApplySaved
+                    ? "Use saved profile"
+                    : "Already active"}
             </Button>
           </div>
         </DialogFooter>
