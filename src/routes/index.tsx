@@ -258,11 +258,42 @@ function Index() {
           <div className="mt-6">
             <PitchLane
               tones={word.tones}
-              samplesRef={samplesRef}
-              baselineRef={baselineRef}
+              samplesRef={listening ? samplesRef : viewSamplesRef}
+              baselineRef={listening ? baselineRef : viewBaselineRef}
               active={listening || (frozen.current && !!result?.ok)}
             />
           </div>
+
+          {wordAttempts.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                Recent attempts · {word.word}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Recent attempts">
+                {wordAttempts.map((a, i) => {
+                  const isLatest = i === wordAttempts.length - 1;
+                  const selected = a.id === selectedAttempt;
+                  return (
+                    <button
+                      key={a.id}
+                      aria-pressed={selected}
+                      onClick={() => showAttempt(a)}
+                      className={cn(
+                        "rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                        selected
+                          ? "border-primary bg-primary/15 text-primary"
+                          : "border-border bg-card/60 text-muted-foreground hover:border-primary/50",
+                      )}
+                    >
+                      Attempt {i + 1} {isLatest ? "(latest: " : "("}
+                      {a.score}%)
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
 
           <div className="mt-5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:justify-between">
             <div className="min-w-0">
