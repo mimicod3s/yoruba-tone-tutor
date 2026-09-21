@@ -114,7 +114,7 @@ export const DECK: ToneWord[] = [
     tones: ["L", "L"],
     meaning: "time / season",
     gloss: "Two low tones.",
-    group: "ìgbà / igbá / igba",
+    group: "ìgbà / igbá",
   },
   {
     id: "igba-calabash",
@@ -123,7 +123,7 @@ export const DECK: ToneWord[] = [
     tones: ["M", "H"],
     meaning: "calabash",
     gloss: "Mid then High.",
-    group: "ìgbà / igbá / igba",
+    group: "ìgbà / igbá",
   },
   {
     id: "ori-head",

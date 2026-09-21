@@ -128,7 +128,7 @@ export function PitchLane({ tones, samplesRef, baselineRef, windowMs = 3000, act
     <div className="relative h-56 w-full overflow-hidden rounded-3xl border border-border bg-[oklch(0.22_0.03_300)]">
       <canvas ref={canvasRef} className="h-full w-full" />
       {!active && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 grid place-items-center">
           <p className="rounded-full bg-background/70 px-4 py-1.5 text-xs text-muted-foreground">
             Your voice contour will be drawn here
           </p>
