@@ -74,7 +74,12 @@ export function usePitchRecorder() {
     }
   }, []);
 
-  useEffect(() => () => stop(), [stop]);
+  useEffect(
+    () => () => {
+      stop();
+    },
+    [stop],
+  );
 
   return { status, level, liveHz, samplesRef, baselineRef, start, stop };
 }
