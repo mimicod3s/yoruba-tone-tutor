@@ -56,6 +56,7 @@ export const METHODS: Record<
 };
 
 const KEY = "yoruba-tone-calibration-v1";
+const STORE_KEY = "yoruba-tone-calibration-v2";
 
 export const AUTO_PROFILE: CalibrationProfile = {
   method: "auto",
@@ -65,29 +66,83 @@ export const AUTO_PROFILE: CalibrationProfile = {
   capturedAt: 0,
 };
 
-export function loadProfile(): CalibrationProfile {
-  if (typeof window === "undefined") return AUTO_PROFILE;
+/** Every method keeps its own saved profile so they never overwrite each other. */
+export type CalibrationStore = {
+  active: CalibrationMethod;
+  profiles: {
+    english: CalibrationProfile | null;
+    melody: CalibrationProfile | null;
+  };
+};
+
+export const EMPTY_STORE: CalibrationStore = {
+  active: "auto",
+  profiles: { english: null, melody: null },
+};
+
+export function loadStore(): CalibrationStore {
+  if (typeof window === "undefined") return EMPTY_STORE;
   try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return AUTO_PROFILE;
-    const parsed = JSON.parse(raw) as CalibrationProfile;
-    if (!parsed || !parsed.method) return AUTO_PROFILE;
-    return parsed;
+    const raw = window.localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as CalibrationStore;
+      if (parsed?.active && parsed.profiles) {
+        return {
+          active: parsed.active,
+          profiles: {
+            english: parsed.profiles.english ?? null,
+            melody: parsed.profiles.melody ?? null,
+          },
+        };
+      }
+    }
+    // Migrate the old single-profile format.
+    const legacy = window.localStorage.getItem(KEY);
+    if (legacy) {
+      const p = JSON.parse(legacy) as CalibrationProfile;
+      if (p?.method) {
+        const store: CalibrationStore = {
+          active: p.method,
+          profiles: {
+            english: p.method === "english" ? p : null,
+            melody: p.method === "melody" ? p : null,
+          },
+        };
+        saveStore(store);
+        return store;
+      }
+    }
+    return EMPTY_STORE;
   } catch {
-    return AUTO_PROFILE;
+    return EMPTY_STORE;
   }
 }
 
-export function saveProfile(profile: CalibrationProfile) {
+export function saveStore(store: CalibrationStore) {
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(profile));
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(store));
   } catch {
-    /* storage unavailable — profile stays in memory only */
+    /* storage unavailable — profiles stay in memory only */
   }
+}
+
+/** The profile currently applied to practice scoring. */
+export function activeProfile(store: CalibrationStore): CalibrationProfile {
+  if (store.active === "auto") return AUTO_PROFILE;
+  return store.profiles[store.active] ?? AUTO_PROFILE;
+}
+
+export function withSavedProfile(store: CalibrationStore, profile: CalibrationProfile): CalibrationStore {
+  if (profile.method === "auto") return { ...store, active: "auto" };
+  return {
+    active: profile.method,
+    profiles: { ...store.profiles, [profile.method]: profile },
+  };
 }
 
 export function clearProfile() {
   try {
+    window.localStorage.removeItem(STORE_KEY);
     window.localStorage.removeItem(KEY);
   } catch {
     /* ignore */
