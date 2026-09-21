@@ -1,10 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, Mic, Square, Volume2, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { Check, Mic, Settings2, Square, Volume2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { CalibrationDialog } from "@/components/CalibrationDialog";
 import { PitchLane } from "@/components/PitchLane";
 import { Button } from "@/components/ui/button";
 import { usePitchRecorder } from "@/hooks/use-pitch-recorder";
+import {
+  AUTO_PROFILE,
+  METHODS,
+  isCalibrated,
+  loadProfile,
+  saveProfile,
+  type CalibrationProfile,
+} from "@/lib/calibration";
 import { evaluateContour, type Evaluation } from "@/lib/evaluate-tones";
 import { playTonePattern } from "@/lib/tone-audio";
 import { DECK, TONE_INFO, type Tone, type ToneWord } from "@/lib/tone-deck";
@@ -51,7 +60,19 @@ function Index() {
   const [index, setIndex] = useState(0);
   const [result, setResult] = useState<Evaluation | null>(null);
   const [history, setHistory] = useState<Record<string, number>>({});
+  const [profile, setProfile] = useState<CalibrationProfile>(AUTO_PROFILE);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
   const frozen = useRef(false);
+
+  useEffect(() => {
+    setProfile(loadProfile());
+  }, []);
+
+  const handleSaveProfile = (next: CalibrationProfile) => {
+    setProfile(next);
+    saveProfile(next);
+    setResult(null);
+  };
 
   const word: ToneWord = DECK[index]!;
   const { status, level, liveHz, samplesRef, baselineRef, start, stop } = usePitchRecorder();
@@ -72,7 +93,7 @@ function Index() {
   const handleStop = () => {
     const samples = stop();
     frozen.current = true;
-    const evaluation = evaluateContour(samples, word.tones);
+    const evaluation = evaluateContour(samples, word.tones, profile);
     setResult(evaluation);
     if (evaluation.ok) {
       setHistory((h) => ({ ...h, [word.id]: Math.max(h[word.id] ?? 0, evaluation.score) }));
@@ -112,9 +133,14 @@ function Index() {
               Tone Trainer
             </h1>
           </div>
-          <div className="shrink-0 rounded-2xl border border-border bg-card/70 px-4 py-2 text-right">
-            <p className="text-xs text-muted-foreground">Average best</p>
-            <p className="text-xl font-semibold text-primary">{attempted ? `${best}%` : "—"}</p>
+          <div className="flex shrink-0 items-center gap-3">
+            <Button variant="secondary" className="gap-2" onClick={() => setCalibrationOpen(true)}>
+              <Settings2 className="h-4 w-4" /> Calibrate voice
+            </Button>
+            <div className="rounded-2xl border border-border bg-card/70 px-4 py-2 text-right">
+              <p className="text-xs text-muted-foreground">Average best</p>
+              <p className="text-xl font-semibold text-primary">{attempted ? `${best}%` : "—"}</p>
+            </div>
           </div>
         </header>
 
@@ -124,6 +150,25 @@ function Index() {
           the target melody, say the word out loud, and your pitch is scored on the shifts between syllables — relative
           to your own voice, not a fixed note.
         </p>
+
+        <button
+          onClick={() => setCalibrationOpen(true)}
+          className="mt-5 flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-border bg-card/60 px-4 py-3 text-left transition-colors hover:border-primary/50"
+        >
+          <span className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Calibration</span>
+          <span className="text-sm font-semibold">{METHODS[profile.method].title}</span>
+          {isCalibrated(profile) ? (
+            <span className="text-xs text-muted-foreground">
+              Low {Math.round(profile.lowHz!)} Hz · Mid {Math.round(profile.midHz!)} Hz · High{" "}
+              {Math.round(profile.highHz!)} Hz
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              Judging each attempt against itself — calibrate for sharper scoring on all-low or all-high words.
+            </span>
+          )}
+          <span className="ml-auto text-xs font-semibold text-primary">Change</span>
+        </button>
 
         {/* Word card */}
         <section className="mt-8 rounded-3xl border border-border bg-card/80 p-5 shadow-2xl backdrop-blur sm:p-7">
@@ -218,9 +263,11 @@ function Index() {
                   <p className="text-3xl font-semibold text-primary">{result.score}%</p>
                 </div>
                 <p className="shrink-0 text-right text-xs text-muted-foreground">
-                  Baseline {Math.round(result.baselineHz)} Hz
+                  {result.usedCalibration ? "Calibrated mid" : "Baseline"} {Math.round(result.baselineHz)} Hz
                   <br />
                   Range used {result.rangeSemitones.toFixed(1)} semitones
+                  <br />
+                  {result.usedCalibration ? `Scored with ${METHODS[profile.method].title}` : "Scored relatively"}
                 </p>
               </div>
 
@@ -246,7 +293,7 @@ function Index() {
                       <p className="text-xs text-muted-foreground">
                         target {TONE_INFO[s.target].label} · you sang {TONE_INFO[s.detected].label} (
                         {s.relSemitones > 0 ? "+" : ""}
-                        {s.relSemitones.toFixed(1)} st)
+                        {s.relSemitones.toFixed(1)} st · {Math.round(s.hz)} Hz)
                       </p>
                     </div>
                   </div>
@@ -329,6 +376,13 @@ function Index() {
           speaking pitch — so any voice range works.
         </footer>
       </div>
+
+      <CalibrationDialog
+        open={calibrationOpen}
+        onOpenChange={setCalibrationOpen}
+        profile={profile}
+        onSave={handleSaveProfile}
+      />
     </main>
   );
 }
