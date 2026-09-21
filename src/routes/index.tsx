@@ -216,7 +216,11 @@ function Index() {
               Judging each attempt against itself — calibrate for sharper scoring on all-low or all-high words.
             </span>
           )}
-          <span className="ml-auto text-xs font-semibold text-primary">Change</span>
+          <span className="text-xs text-muted-foreground">
+            Saved: {METHODS.english.title} {store.profiles.english ? "✓" : "—"} · {METHODS.melody.title}{" "}
+            {store.profiles.melody ? "✓" : "—"}
+          </span>
+          <span className="ml-auto text-xs font-semibold text-primary">Switch</span>
         </button>
 
         {/* Word card */}
