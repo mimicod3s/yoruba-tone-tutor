@@ -53,3 +53,31 @@ export function playTonePattern(tones: Tone[], baseHz = BASE_HZ) {
 
   return tones.length * (dur + gap) * 1000;
 }
+
+/** Plays a sequence of semitone offsets from a root as soft guide notes. */
+export function playNotes(offsets: number[], rootHz: number, noteDur = 0.42) {
+  const ac = audioCtx();
+  const t0 = ac.currentTime + 0.05;
+  offsets.forEach((semi, i) => {
+    const start = t0 + i * noteDur;
+    const osc = ac.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(rootHz * Math.pow(2, semi / 12), start);
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.18, start + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + noteDur * 0.95);
+    osc.connect(gain).connect(ac.destination);
+    osc.start(start);
+    osc.stop(start + noteDur);
+  });
+  return offsets.length * noteDur * 1000;
+}
+
+/** "Twinkle, twinkle, little star, how I wonder what you are" — spans 9 semitones. */
+export const TWINKLE_OFFSETS = [0, 0, 7, 7, 9, 9, 7, 5, 5, 4, 4, 2, 2, 0];
+
+export const playTwinkleGuide = (rootHz = 165) => playNotes(TWINKLE_OFFSETS, rootHz, 0.4);
+
+/** Low → Mid → High reference for the English-phrase method. */
+export const playSpeechGuide = (rootHz = 165) => playNotes([-4, 0, 4], rootHz, 0.5);
