@@ -57,27 +57,47 @@ function ToneChip({ tone }: { tone: Tone }) {
   );
 }
 
+type Attempt = {
+  id: number;
+  at: number;
+  score: number;
+  evaluation: Evaluation;
+  samples: PitchSample[];
+  baselineHz: number;
+};
+
+const MAX_ATTEMPTS = 3;
+
 function Index() {
   const [index, setIndex] = useState(0);
-  const [result, setResult] = useState<Evaluation | null>(null);
   const [history, setHistory] = useState<Record<string, number>>({});
-  const [profile, setProfile] = useState<CalibrationProfile>(AUTO_PROFILE);
+  const [attempts, setAttempts] = useState<Record<string, Attempt[]>>({});
+  const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
+  const [store, setStore] = useState<CalibrationStore>(EMPTY_STORE);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const frozen = useRef(false);
+  const viewSamplesRef = useRef<PitchSample[]>([]);
+  const viewBaselineRef = useRef<number | null>(null);
 
   useEffect(() => {
-    setProfile(loadProfile());
+    setStore(loadStore());
   }, []);
 
-  const handleSaveProfile = (next: CalibrationProfile) => {
-    setProfile(next);
-    saveProfile(next);
-    setResult(null);
+  const profile = useMemo(() => activeProfile(store), [store]);
+
+  const handleStoreChange = (next: CalibrationStore) => {
+    setStore(next);
+    saveStore(next);
   };
 
   const word: ToneWord = DECK[index]!;
   const { status, level, liveHz, samplesRef, baselineRef, start, stop } = usePitchRecorder();
   const listening = status === "listening";
+
+  const wordAttempts = attempts[word.id] ?? [];
+  const current =
+    selectedAttempt != null ? (wordAttempts.find((a) => a.id === selectedAttempt) ?? null) : null;
+  const result = current?.evaluation ?? null;
 
   const groups = useMemo(() => {
     const map = new Map<string, ToneWord[]>();
@@ -85,27 +105,55 @@ function Index() {
     return [...map.entries()];
   }, []);
 
+  const showAttempt = (attempt: Attempt) => {
+    viewSamplesRef.current = attempt.samples;
+    viewBaselineRef.current = attempt.baselineHz;
+    frozen.current = true;
+    setSelectedAttempt(attempt.id);
+  };
+
   const handleStart = async () => {
-    setResult(null);
+    setSelectedAttempt(null);
     frozen.current = false;
     await start();
   };
 
   const handleStop = () => {
-    const samples = stop();
+    const samples = [...stop()];
     frozen.current = true;
     const evaluation = evaluateContour(samples, word.tones, profile);
-    setResult(evaluation);
-    if (evaluation.ok) {
-      setHistory((h) => ({ ...h, [word.id]: Math.max(h[word.id] ?? 0, evaluation.score) }));
+    if (!evaluation.ok) {
+      viewSamplesRef.current = samples;
+      viewBaselineRef.current = null;
+      setAttempts((a) => ({ ...a }));
+      setSelectedAttempt(null);
+      setFailed(evaluation);
+      return;
     }
+    setFailed(null);
+    const attempt: Attempt = {
+      id: Date.now(),
+      at: Date.now(),
+      score: evaluation.score,
+      evaluation,
+      samples,
+      baselineHz: evaluation.baselineHz,
+    };
+    setAttempts((a) => ({ ...a, [word.id]: [...(a[word.id] ?? []), attempt].slice(-MAX_ATTEMPTS) }));
+    setHistory((h) => ({ ...h, [word.id]: Math.max(h[word.id] ?? 0, evaluation.score) }));
+    showAttempt(attempt);
   };
+
+  const [failed, setFailed] = useState<Evaluation | null>(null);
 
   const pick = (i: number) => {
     if (listening) stop();
     frozen.current = false;
     setIndex(i);
-    setResult(null);
+    setSelectedAttempt(null);
+    setFailed(null);
+    viewSamplesRef.current = [];
+    viewBaselineRef.current = null;
   };
 
   const attempted = Object.keys(history).length;
