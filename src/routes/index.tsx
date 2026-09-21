@@ -329,9 +329,9 @@ function Index() {
             </p>
           )}
 
-          {result && !result.ok && (
+          {failed && !failed.ok && (
             <p className="mt-4 rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm text-muted-foreground">
-              {result.message}
+              {failed.message}
             </p>
           )}
 
@@ -460,8 +460,8 @@ function Index() {
       <CalibrationDialog
         open={calibrationOpen}
         onOpenChange={setCalibrationOpen}
-        profile={profile}
-        onSave={handleSaveProfile}
+        store={store}
+        onChange={handleStoreChange}
       />
     </main>
   );
