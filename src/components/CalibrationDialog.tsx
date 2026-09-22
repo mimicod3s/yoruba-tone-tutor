@@ -279,7 +279,7 @@ export function CalibrationDialog({ open, onOpenChange, store, onChange }: Props
 
           {saved && phase === "idle" && (
             <p className="mt-3 text-xs text-muted-foreground">
-              Saved bands: Low {Math.round(saved.lowHz ?? 0)} Hz · Mid {Math.round(saved.midHz ?? 0)} Hz · High{" "}
+              Saved anchors: Dò {Math.round(saved.lowHz ?? 0)} Hz · Re {Math.round(saved.midHz ?? 0)} Hz · Mí{" "}
               {Math.round(saved.highHz ?? 0)} Hz. Switch to it without re-recording, or record again to replace it.
             </p>
           )}
@@ -295,9 +295,9 @@ export function CalibrationDialog({ open, onOpenChange, store, onChange }: Props
             <div className="mt-3 grid grid-cols-3 gap-3">
               {(
                 [
-                  ["Low", bands.low, "text-tone-low"],
-                  ["Mid", bands.mid, "text-tone-mid"],
-                  ["High", bands.high, "text-tone-high"],
+                  ["Low · Ò · Dò", bands.low, "text-tone-low"],
+                  ["Mid · O · Re", bands.mid, "text-tone-mid"],
+                  ["High · Ó · Mí", bands.high, "text-tone-high"],
                 ] as const
               ).map(([label, value, cls]) => (
                 <div key={label} className="rounded-xl border border-border bg-background/50 px-3 py-2">
