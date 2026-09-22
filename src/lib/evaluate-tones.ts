@@ -24,7 +24,7 @@ export type Evaluation = {
   syllables: SyllableResult[];
   contourScore: number;
   tips: string[];
-  /** True when saved calibration bands were used to judge absolute pitch. */
+  /** True when calibration supplied the speaker's relative step sensitivity. */
   usedCalibration: boolean;
   /** Personalized size of one Low↔Mid or Mid↔High step. */
   stepSemitones: number;
@@ -41,25 +41,21 @@ function calibrationStep(profile?: CalibrationProfile | null) {
   return clamp((lowStep + highStep) / 2, 0.8, 6);
 }
 
-function inferStep(deltas: number[], targets: Tone[]) {
-  const candidates = deltas
-    .map((delta, i) => {
-      if (i === 0) return 0;
-      const levels = Math.abs(toneValue(targets[i]!) - toneValue(targets[i - 1]!));
-      return levels ? Math.abs(delta) / levels : 0;
-    })
-    .filter((value) => value >= 0.5);
-  return candidates.length ? clamp(median(candidates), 0.8, 6) : 2.5;
+function inferStep(spread: number) {
+  // Without calibration, scale sensitivity gently to the current vocal range.
+  // The bounds prevent one performance from defining its own answer.
+  return clamp(spread / 3, 1.2, 3.5);
+}
+
+function movementLevel(actual: number, step: number) {
+  // A little downward movement is still level: connected Yorùbá speech naturally downdrifts.
+  if (actual >= -step * 0.6 && actual <= step * 0.45) return 0;
+  const magnitude = Math.abs(actual);
+  return Math.sign(actual) * (magnitude >= step * 1.5 ? 2 : 1);
 }
 
 function transitionMatches(actual: number, targetLevels: number, step: number) {
-  // Flat tones tolerate a small downward drift common in natural connected speech.
-  if (targetLevels === 0) return actual >= -step * 0.55 && actual <= step * 0.45;
-  const direction = Math.sign(targetLevels);
-  if (Math.sign(actual) !== direction) return false;
-  const magnitude = Math.abs(actual);
-  if (Math.abs(targetLevels) === 2) return magnitude >= step * 1.2;
-  return magnitude >= step * 0.3 && magnitude < step * 1.65;
+  return movementLevel(actual, step) === targetLevels;
 }
 
 export function evaluateContour(
@@ -115,15 +111,15 @@ export function evaluateContour(
   const first = targets[0]!;
   const allSame = targets.every((t) => t === first);
   const deltas = segMeans.map((mean, i) => (i === 0 ? 0 : mean - segMeans[i - 1]!));
-  const stepSemitones = calibratedStep ?? inferStep(deltas, targets);
+  const stepSemitones = calibratedStep ?? inferStep(spread);
+  let detectedLevel = toneValue(first);
 
   const syllables: SyllableResult[] = targets.map((target, i) => {
     const mean = segMeans[i]!;
     const delta = deltas[i]!;
     const targetDelta = i === 0 ? 0 : toneValue(target) - toneValue(targets[i - 1]!);
     const correct = i === 0 || transitionMatches(delta, targetDelta, stepSemitones);
-    const previousDetected = i === 0 ? toneValue(target) : toneValue(targets[i - 1]!);
-    const detectedLevel = i === 0 ? toneValue(target) : clamp(previousDetected + Math.round(delta / stepSemitones), -1, 1);
+    if (i > 0) detectedLevel = clamp(detectedLevel + movementLevel(delta, stepSemitones), -1, 1);
     const detected: Tone = detectedLevel > 0 ? "H" : detectedLevel < 0 ? "L" : "M";
 
     return {

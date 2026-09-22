@@ -14,6 +14,12 @@ type Props = {
 
 const lanePosition: Record<Tone, number> = { H: 14, M: 50, L: 86 };
 
+const toneTextClass: Record<Tone, string> = {
+  H: "text-tone-high",
+  M: "text-tone-mid",
+  L: "text-tone-low",
+};
+
 export function PitchLane({ tones, liveHz, baselineHz, profile, active }: Props) {
   const position = useMemo(() => {
     if (!active || liveHz <= 0) return 50;
@@ -30,7 +36,7 @@ export function PitchLane({ tones, liveHz, baselineHz, profile, active }: Props)
       {(["H", "M", "L"] as Tone[]).map((tone) => (
         <div key={tone} className="absolute inset-x-4" style={{ top: `${lanePosition[tone]}%` }}>
           <div className="border-t border-dashed border-border" />
-          <span className={cn("absolute -top-6 left-0 text-xs font-semibold", `text-tone-${tone === "H" ? "high" : tone === "M" ? "mid" : "low"}`)}>
+          <span className={cn("absolute -top-6 left-0 text-xs font-semibold", toneTextClass[tone])}>
             {TONE_INFO[tone].label} · {TONE_INFO[tone].mark} · {TONE_INFO[tone].solfa}
           </span>
         </div>

@@ -88,7 +88,7 @@ function Index() {
   };
 
   const word: ToneWord = DECK[index]!;
-  const { status, level, liveHz, samplesRef, baselineRef, start, stop } = usePitchRecorder();
+  const { status, level, liveHz, baselineRef, start, stop } = usePitchRecorder();
   const listening = status === "listening";
 
   const wordAttempts = attempts[word.id] ?? [];
