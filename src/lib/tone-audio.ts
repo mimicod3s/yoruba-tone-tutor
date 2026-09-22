@@ -1,4 +1,5 @@
 import { TONE_INFO, type Tone } from "./tone-deck";
+import type { CalibrationProfile } from "./calibration";
 
 let ctx: AudioContext | null = null;
 
@@ -11,19 +12,29 @@ function audioCtx(): AudioContext {
 /** Base pitch of the reference chime, in Hz (a comfortable mid speaking pitch). */
 export const BASE_HZ = 196; // G3
 
-export const toneHz = (tone: Tone, baseHz = BASE_HZ) =>
-  baseHz * Math.pow(2, TONE_INFO[tone].semitone / 12);
+function calibratedOffset(tone: Tone, profile?: CalibrationProfile | null) {
+  if (profile?.lowHz && profile.midHz && profile.highHz) {
+    if (tone === "L") return 12 * Math.log2(profile.lowHz / profile.midHz);
+    if (tone === "H") return 12 * Math.log2(profile.highHz / profile.midHz);
+    return 0;
+  }
+  return TONE_INFO[tone].semitone;
+}
+
+export const toneHz = (tone: Tone, baseHz = BASE_HZ, profile?: CalibrationProfile | null) =>
+  baseHz * Math.pow(2, calibratedOffset(tone, profile) / 12);
 
 /** Plays a soft chime/whistle sequence for a target tone pattern. */
-export function playTonePattern(tones: Tone[], baseHz = BASE_HZ) {
+export function playTonePattern(tones: Tone[], profile?: CalibrationProfile | null) {
   const ac = audioCtx();
+  const baseHz = profile?.midHz ?? BASE_HZ;
   const t0 = ac.currentTime + 0.05;
   const dur = 0.45;
   const gap = 0.08;
 
   tones.forEach((tone, i) => {
     const start = t0 + i * (dur + gap);
-    const freq = toneHz(tone, baseHz);
+    const freq = toneHz(tone, baseHz, profile);
 
     const osc = ac.createOscillator();
     osc.type = "sine";

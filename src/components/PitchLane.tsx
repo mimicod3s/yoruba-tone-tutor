@@ -1,139 +1,59 @@
-import { useEffect, useRef } from "react";
+import { useMemo } from "react";
 
-import type { PitchSample } from "@/lib/evaluate-tones";
+import type { CalibrationProfile } from "@/lib/calibration";
 import { TONE_INFO, type Tone } from "@/lib/tone-deck";
+import { cn } from "@/lib/utils";
 
 type Props = {
   tones: Tone[];
-  samplesRef: React.RefObject<PitchSample[]>;
-  baselineRef: React.RefObject<number | null>;
-  windowMs?: number;
+  liveHz: number;
+  baselineHz: number | null;
+  profile?: CalibrationProfile | null;
   active: boolean;
 };
 
-const RANGE = 11; // semitones shown above/below baseline
+const lanePosition: Record<Tone, number> = { H: 14, M: 50, L: 86 };
 
-const toneColor = (tone: Tone) =>
-  tone === "H" ? "rgba(247, 184, 74, 1)" : tone === "M" ? "rgba(122, 196, 180, 1)" : "rgba(186, 147, 232, 1)";
-
-export function PitchLane({ tones, samplesRef, baselineRef, windowMs = 3000, active }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let raf = 0;
-
-    const draw = () => {
-      const parent = canvas.parentElement;
-      const dpr = window.devicePixelRatio || 1;
-      const w = parent?.clientWidth ?? 600;
-      const h = parent?.clientHeight ?? 220;
-      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-      }
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-
-      const yFor = (st: number) => h / 2 - (st / RANGE) * (h / 2 - 14);
-
-      // Guide rails for each tone level
-      (["H", "M", "L"] as Tone[]).forEach((tone) => {
-        const y = yFor(TONE_INFO[tone].semitone);
-        ctx.strokeStyle = "rgba(255,255,255,0.14)";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 6]);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
-        ctx.font = "500 11px Manrope, system-ui, sans-serif";
-        ctx.fillText(`${TONE_INFO[tone].label} · ${TONE_INFO[tone].solfa}`, 6, y - 6);
-      });
-
-      // Target bars per syllable
-      const segW = w / tones.length;
-      tones.forEach((tone, i) => {
-        const y = yFor(TONE_INFO[tone].semitone);
-        const x = i * segW + segW * 0.1;
-        const barW = segW * 0.8;
-        ctx.fillStyle = toneColor(tone);
-        ctx.globalAlpha = 0.28;
-        ctx.beginPath();
-        ctx.roundRect(x, y - 9, barW, 18, 9);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = toneColor(tone);
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(x, y - 9, barW, 18, 9);
-        ctx.stroke();
-
-        if (i > 0) {
-          ctx.strokeStyle = "rgba(255,255,255,0.2)";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(i * segW, 0);
-          ctx.lineTo(i * segW, h);
-          ctx.stroke();
-        }
-      });
-
-      // Live voice contour
-      const samples = samplesRef.current ?? [];
-      const baseline = baselineRef.current;
-      if (samples.length > 1 && baseline) {
-        const last = samples[samples.length - 1]!.t;
-        const t0 = Math.max(0, last - windowMs);
-        const span = Math.max(windowMs, last - t0);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(255, 252, 245, 0.95)";
-        ctx.shadowColor = "rgba(247, 184, 74, 0.7)";
-        ctx.shadowBlur = 10;
-        ctx.beginPath();
-        let drawing = false;
-        for (const s of samples) {
-          if (s.t < t0) continue;
-          if (s.hz <= 0) {
-            drawing = false;
-            continue;
-          }
-          const st = 12 * Math.log2(s.hz / baseline);
-          const x = ((s.t - t0) / span) * w;
-          const y = yFor(Math.max(-RANGE, Math.min(RANGE, st)));
-          if (!drawing) {
-            ctx.moveTo(x, y);
-            drawing = true;
-          } else {
-            ctx.lineTo(x, y);
-          }
-        }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
-
-      raf = requestAnimationFrame(draw);
-    };
-
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  }, [tones, samplesRef, baselineRef, windowMs, active]);
+export function PitchLane({ tones, liveHz, baselineHz, profile, active }: Props) {
+  const position = useMemo(() => {
+    if (!active || liveHz <= 0) return 50;
+    const mid = profile?.midHz ?? baselineHz ?? liveHz;
+    const lowStep = profile?.lowHz && profile.midHz ? Math.abs(12 * Math.log2(profile.midHz / profile.lowHz)) : 4;
+    const highStep = profile?.highHz && profile.midHz ? Math.abs(12 * Math.log2(profile.highHz / profile.midHz)) : 4;
+    const relative = 12 * Math.log2(liveHz / mid);
+    const scaled = relative >= 0 ? relative / Math.max(1, highStep) : relative / Math.max(1, lowStep);
+    return Math.max(8, Math.min(92, 50 - scaled * 36));
+  }, [active, baselineHz, liveHz, profile]);
 
   return (
-    <div className="relative h-56 w-full overflow-hidden rounded-3xl border border-border bg-[oklch(0.22_0.03_300)]">
-      <canvas ref={canvasRef} className="h-full w-full" />
-      {!active && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 grid place-items-center">
-          <p className="rounded-full bg-background/70 px-4 py-1.5 text-xs text-muted-foreground">
-            Your voice contour will be drawn here
-          </p>
+    <div className="relative h-56 w-full overflow-hidden rounded-2xl border border-border bg-background/50" aria-label="Live pitch gauge">
+      {(["H", "M", "L"] as Tone[]).map((tone) => (
+        <div key={tone} className="absolute inset-x-4" style={{ top: `${lanePosition[tone]}%` }}>
+          <div className="border-t border-dashed border-border" />
+          <span className={cn("absolute -top-6 left-0 text-xs font-semibold", `text-tone-${tone === "H" ? "high" : tone === "M" ? "mid" : "low"}`)}>
+            {TONE_INFO[tone].label} · {TONE_INFO[tone].mark} · {TONE_INFO[tone].solfa}
+          </span>
         </div>
-      )}
+      ))}
+
+      <div className="absolute inset-y-0 left-1/2 border-l border-border/60" />
+      <div
+        className={cn(
+          "absolute left-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 shadow-lg transition-[top,opacity,transform] duration-150",
+          active && liveHz > 0 ? "border-primary bg-primary text-primary-foreground opacity-100" : "border-border bg-card text-muted-foreground opacity-60",
+        )}
+        style={{ top: `${position}%` }}
+      >
+        <span className="text-xs font-bold">{liveHz > 0 && active ? liveHz : "—"}</span>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-3 flex justify-center gap-2" aria-label="Target tone sequence">
+        {tones.map((tone, index) => (
+          <span key={`${tone}-${index}`} className={cn("grid h-7 w-7 place-items-center rounded-full border text-xs font-bold", tone === "H" ? "border-tone-high/60 bg-tone-high/10 text-tone-high" : tone === "M" ? "border-tone-mid/60 bg-tone-mid/10 text-tone-mid" : "border-tone-low/60 bg-tone-low/10 text-tone-low")}>
+            {TONE_INFO[tone].solfa}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

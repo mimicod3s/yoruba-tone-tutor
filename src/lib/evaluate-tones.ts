@@ -8,6 +8,8 @@ export type SyllableResult = {
   target: Tone;
   detected: Tone;
   relSemitones: number;
+  /** Local movement from the preceding syllable; zero for the starting anchor. */
+  deltaSemitones: number;
   /** Absolute pitch of this syllable in Hz. */
   hz: number;
   correct: boolean;
@@ -24,16 +26,40 @@ export type Evaluation = {
   tips: string[];
   /** True when saved calibration bands were used to judge absolute pitch. */
   usedCalibration: boolean;
+  /** Personalized size of one Low↔Mid or Mid↔High step. */
+  stepSemitones: number;
 };
 
 const toneValue = (t: Tone) => (t === "H" ? 1 : t === "M" ? 0 : -1);
 
-function classifyRelative(rel: number, spread: number): Tone {
-  // Threshold scales with how much range the speaker actually used.
-  const thr = Math.max(0.9, Math.min(2.2, spread * 0.35));
-  if (rel > thr) return "H";
-  if (rel < -thr) return "L";
-  return "M";
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+function calibrationStep(profile?: CalibrationProfile | null) {
+  if (!profile?.lowHz || !profile.midHz || !profile.highHz) return null;
+  const lowStep = Math.abs(12 * Math.log2(profile.midHz / profile.lowHz));
+  const highStep = Math.abs(12 * Math.log2(profile.highHz / profile.midHz));
+  return clamp((lowStep + highStep) / 2, 0.8, 6);
+}
+
+function inferStep(deltas: number[], targets: Tone[]) {
+  const candidates = deltas
+    .map((delta, i) => {
+      if (i === 0) return 0;
+      const levels = Math.abs(toneValue(targets[i]!) - toneValue(targets[i - 1]!));
+      return levels ? Math.abs(delta) / levels : 0;
+    })
+    .filter((value) => value >= 0.5);
+  return candidates.length ? clamp(median(candidates), 0.8, 6) : 2.5;
+}
+
+function transitionMatches(actual: number, targetLevels: number, step: number) {
+  // Flat tones tolerate a small downward drift common in natural connected speech.
+  if (targetLevels === 0) return actual >= -step * 0.55 && actual <= step * 0.45;
+  const direction = Math.sign(targetLevels);
+  if (Math.sign(actual) !== direction) return false;
+  const magnitude = Math.abs(actual);
+  if (Math.abs(targetLevels) === 2) return magnitude >= step * 1.2;
+  return magnitude >= step * 0.3 && magnitude < step * 1.65;
 }
 
 export function evaluateContour(
@@ -51,6 +77,7 @@ export function evaluateContour(
     contourScore: 0,
     tips: [],
     usedCalibration: false,
+    stepSemitones: 2.5,
   };
 
   if (voiced.length < 8 || targets.length === 0) {
@@ -66,14 +93,8 @@ export function evaluateContour(
   );
   const utteranceMedian = median(hz);
 
-  const calibrated =
-    !!profile && profile.method !== "auto" && !!profile.lowHz && !!profile.midHz && !!profile.highHz;
-  const refHz = calibrated ? profile!.midHz! : utteranceMedian;
-  const driftSemitones = 12 * Math.log2(utteranceMedian / refHz);
-  // If the speaker is in a very different register than at calibration time,
-  // absolute bands would mislabel everything — fall back to relative judging.
-  const useCalibration = calibrated && Math.abs(driftSemitones) <= 6;
-  const baselineHz = useCalibration ? refHz : utteranceMedian;
+  const calibratedStep = calibrationStep(profile);
+  const baselineHz = profile?.midHz ?? utteranceMedian;
 
   const st = hz.map((f) => 12 * Math.log2(f / baselineHz));
 
@@ -91,41 +112,27 @@ export function evaluateContour(
     const seg = series.slice(Math.floor(i * per), Math.floor((i + 1) * per));
     segMeans.push(median(seg.length ? seg : series));
   }
-  const centre = segMeans.reduce((a, b) => a + b, 0) / n;
-
   const first = targets[0]!;
   const allSame = targets.every((t) => t === first);
-
-  // Calibrated band edges, in semitones relative to the calibrated mid.
-  let thrHigh = 1.5;
-  let thrLow = -1.5;
-  if (useCalibration) {
-    const highSt = 12 * Math.log2(profile!.highHz! / profile!.midHz!);
-    const lowSt = 12 * Math.log2(profile!.lowHz! / profile!.midHz!);
-    thrHigh = Math.max(1.2, highSt * 0.45);
-    thrLow = Math.min(-1.2, lowSt * 0.45);
-  }
+  const deltas = segMeans.map((mean, i) => (i === 0 ? 0 : mean - segMeans[i - 1]!));
+  const stepSemitones = calibratedStep ?? inferStep(deltas, targets);
 
   const syllables: SyllableResult[] = targets.map((target, i) => {
     const mean = segMeans[i]!;
-    const rel = mean - centre;
-    let detected: Tone;
-
-    if (useCalibration) {
-      // Absolute placement against the user's own calibrated bands.
-      detected = mean > thrHigh ? "H" : mean < thrLow ? "L" : "M";
-    } else if (allSame) {
-      detected = spread < 2.2 ? first : classifyRelative(mean, spread);
-    } else {
-      detected = classifyRelative(rel, spread);
-    }
+    const delta = deltas[i]!;
+    const targetDelta = i === 0 ? 0 : toneValue(target) - toneValue(targets[i - 1]!);
+    const correct = i === 0 || transitionMatches(delta, targetDelta, stepSemitones);
+    const previousDetected = i === 0 ? toneValue(target) : toneValue(targets[i - 1]!);
+    const detectedLevel = i === 0 ? toneValue(target) : clamp(previousDetected + Math.round(delta / stepSemitones), -1, 1);
+    const detected: Tone = detectedLevel > 0 ? "H" : detectedLevel < 0 ? "L" : "M";
 
     return {
       target,
       detected,
-      relSemitones: useCalibration ? mean : rel,
+      relSemitones: mean - segMeans[0]!,
+      deltaSemitones: delta,
       hz: baselineHz * Math.pow(2, mean / 12),
-      correct: detected === target,
+      correct,
     };
   });
 
@@ -136,31 +143,26 @@ export function evaluateContour(
     contourTotal++;
     const targetDelta = toneValue(targets[i]!) - toneValue(targets[i - 1]!);
     const actualDelta = segMeans[i]! - segMeans[i - 1]!;
-    const matched =
-      targetDelta === 0
-        ? Math.abs(actualDelta) < 1.6
-        : Math.sign(actualDelta) === Math.sign(targetDelta) && Math.abs(actualDelta) > 0.8;
+    const matched = transitionMatches(actualDelta, targetDelta, stepSemitones);
     if (matched) contourHits++;
   }
-  const contourScore = contourTotal ? contourHits / contourTotal : syllables[0]!.correct ? 1 : 0;
-  const syllScore = syllables.filter((s) => s.correct).length / n;
-  const score = Math.round((syllScore * 0.7 + contourScore * 0.3) * 100);
+  const contourScore = contourTotal ? contourHits / contourTotal : spread <= stepSemitones * 0.55 ? 1 : 0;
+  const score = Math.round(contourScore * 100);
 
   const tips: string[] = [];
   syllables.forEach((s, i) => {
     if (s.correct) return;
     const pos = `syllable ${i + 1}`;
-    if (s.target === "H") tips.push(`Lift ${pos} higher — high tone sits clearly above your speaking pitch.`);
-    else if (s.target === "L") tips.push(`Drop ${pos} lower — low tone falls below your speaking pitch.`);
+    if (i === 0) return;
+    if (s.target === "H") tips.push(`Lift ${pos} from the syllable before it${Math.abs(toneValue(s.target) - toneValue(targets[i - 1]!)) === 2 ? " with a larger leap" : ""}.`);
+    else if (s.target === "L") tips.push(`Drop ${pos} from the syllable before it${Math.abs(toneValue(s.target) - toneValue(targets[i - 1]!)) === 2 ? " with a larger step" : ""}.`);
     else if (s.detected === "H") tips.push(`Keep ${pos} level — you rose where the tone should stay flat.`);
     else tips.push(`Keep ${pos} level — you dipped where the tone should stay flat.`);
   });
-  if (!allSame && spread < 1.5)
+  if (!allSame && spread < stepSemitones * 0.6)
     tips.push("Your pitch stayed almost flat. Exaggerate the movement at first, then relax it.");
   if (spread > 14)
     tips.push("Your pitch jumped a lot — try smaller, steadier steps so the tones stay distinct but natural.");
-  if (calibrated && !useCalibration)
-    tips.push("You spoke in a very different register than your calibration — recalibrate for sharper scoring.");
   if (!tips.length) tips.push("Clean contour. Try saying it faster while keeping the same tone shape.");
 
   return {
@@ -171,6 +173,7 @@ export function evaluateContour(
     syllables,
     contourScore,
     tips: tips.slice(0, 3),
-    usedCalibration: useCalibration,
+    usedCalibration: calibratedStep != null,
+    stepSemitones,
   };
 }
