@@ -159,19 +159,19 @@ function Index() {
       />
 
       <div className="relative mx-auto max-w-5xl px-5 pb-20 pt-10 sm:px-8">
-        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:justify-between">
+        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary">Ohùn Yorùbá</p>
             <h1
-              className="mt-1 truncate text-3xl font-semibold sm:text-4xl"
+              className="mt-1 text-3xl font-semibold sm:text-4xl"
               style={{ fontFamily: "var(--font-display)" }}
             >
               Tone Trainer
             </h1>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <Button variant="secondary" className="gap-2" onClick={() => setCalibrationOpen(true)}>
-              <Settings2 className="h-4 w-4" /> Calibrate voice
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <Button variant="secondary" className="gap-2 px-3 sm:px-4" onClick={() => setCalibrationOpen(true)}>
+              <Settings2 className="h-4 w-4" /> <span className="hidden sm:inline">Calibrate voice</span>
             </Button>
             <div className="rounded-2xl border border-border bg-card/70 px-4 py-2 text-right">
               <p className="text-xs text-muted-foreground">Average best</p>
