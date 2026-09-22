@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Check, Mic, Settings2, Square, Volume2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CalibrationDialog } from "@/components/CalibrationDialog";
 import { PitchLane } from "@/components/PitchLane";
@@ -75,9 +75,6 @@ function Index() {
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [store, setStore] = useState<CalibrationStore>(EMPTY_STORE);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
-  const frozen = useRef(false);
-  const viewSamplesRef = useRef<PitchSample[]>([]);
-  const viewBaselineRef = useRef<number | null>(null);
 
   useEffect(() => {
     setStore(loadStore());
@@ -91,7 +88,7 @@ function Index() {
   };
 
   const word: ToneWord = DECK[index]!;
-  const { status, level, liveHz, samplesRef, baselineRef, start, stop } = usePitchRecorder();
+  const { status, level, liveHz, baselineRef, start, stop } = usePitchRecorder();
   const listening = status === "listening";
 
   const wordAttempts = attempts[word.id] ?? [];
@@ -106,25 +103,18 @@ function Index() {
   }, []);
 
   const showAttempt = (attempt: Attempt) => {
-    viewSamplesRef.current = attempt.samples;
-    viewBaselineRef.current = attempt.baselineHz;
-    frozen.current = true;
     setSelectedAttempt(attempt.id);
   };
 
   const handleStart = async () => {
     setSelectedAttempt(null);
-    frozen.current = false;
     await start();
   };
 
   const handleStop = () => {
     const samples = [...stop()];
-    frozen.current = true;
     const evaluation = evaluateContour(samples, word.tones, profile);
     if (!evaluation.ok) {
-      viewSamplesRef.current = samples;
-      viewBaselineRef.current = null;
       setAttempts((a) => ({ ...a }));
       setSelectedAttempt(null);
       setFailed(evaluation);
@@ -148,12 +138,9 @@ function Index() {
 
   const pick = (i: number) => {
     if (listening) stop();
-    frozen.current = false;
     setIndex(i);
     setSelectedAttempt(null);
     setFailed(null);
-    viewSamplesRef.current = [];
-    viewBaselineRef.current = null;
   };
 
   const attempted = Object.keys(history).length;
@@ -172,19 +159,19 @@ function Index() {
       />
 
       <div className="relative mx-auto max-w-5xl px-5 pb-20 pt-10 sm:px-8">
-        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:justify-between">
+        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary">Ohùn Yorùbá</p>
             <h1
-              className="mt-1 truncate text-3xl font-semibold sm:text-4xl"
+              className="mt-1 text-3xl font-semibold sm:text-4xl"
               style={{ fontFamily: "var(--font-display)" }}
             >
               Tone Trainer
             </h1>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <Button variant="secondary" className="gap-2" onClick={() => setCalibrationOpen(true)}>
-              <Settings2 className="h-4 w-4" /> Calibrate voice
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <Button variant="secondary" className="gap-2 px-3 sm:px-4" onClick={() => setCalibrationOpen(true)}>
+              <Settings2 className="h-4 w-4" /> <span className="hidden sm:inline">Calibrate voice</span>
             </Button>
             <div className="rounded-2xl border border-border bg-card/70 px-4 py-2 text-right">
               <p className="text-xs text-muted-foreground">Average best</p>
@@ -208,8 +195,8 @@ function Index() {
           <span className="text-sm font-semibold">{METHODS[profile.method].title}</span>
           {isCalibrated(profile) ? (
             <span className="text-xs text-muted-foreground">
-              Low {Math.round(profile.lowHz!)} Hz · Mid {Math.round(profile.midHz!)} Hz · High{" "}
-              {Math.round(profile.highHz!)} Hz
+              Dò {Math.round(profile.lowHz ?? 0)} Hz · Re {Math.round(profile.midHz ?? 0)} Hz · Mí{" "}
+              {Math.round(profile.highHz ?? 0)} Hz
             </span>
           ) : (
             <span className="text-xs text-muted-foreground">
@@ -238,7 +225,7 @@ function Index() {
             <Button
               variant="secondary"
               className="shrink-0 gap-2"
-              onClick={() => playTonePattern(word.tones)}
+              onClick={() => playTonePattern(word.tones, profile)}
               aria-label={`Hear the target pitch for ${word.word}`}
             >
               <Volume2 className="h-4 w-4" /> Hear target
@@ -262,9 +249,10 @@ function Index() {
           <div className="mt-6">
             <PitchLane
               tones={word.tones}
-              samplesRef={listening ? samplesRef : viewSamplesRef}
-              baselineRef={listening ? baselineRef : viewBaselineRef}
-              active={listening || (frozen.current && !!result?.ok)}
+              liveHz={liveHz}
+              baselineHz={baselineRef.current}
+              profile={profile}
+              active={listening}
             />
           </div>
 
@@ -347,11 +335,11 @@ function Index() {
                   <p className="text-3xl font-semibold text-primary">{result.score}%</p>
                 </div>
                 <p className="shrink-0 text-right text-xs text-muted-foreground">
-                  {result.usedCalibration ? "Calibrated mid" : "Baseline"} {Math.round(result.baselineHz)} Hz
+                  Voice anchor {Math.round(result.baselineHz)} Hz
                   <br />
-                  Range used {result.rangeSemitones.toFixed(1)} semitones
+                  Personal step {result.stepSemitones.toFixed(1)} semitones
                   <br />
-                  {result.usedCalibration ? `Scored with ${METHODS[profile.method].title}` : "Scored relatively"}
+                  {result.usedCalibration ? `${METHODS[profile.method].title} sensitivity` : "Attempt-based sensitivity"}
                 </p>
               </div>
 
@@ -375,9 +363,11 @@ function Index() {
                     <div className="min-w-0">
                       <p className="text-sm font-semibold">{word.syllables[i]}</p>
                       <p className="text-xs text-muted-foreground">
-                        target {TONE_INFO[s.target].label} · you sang {TONE_INFO[s.detected].label} (
-                        {s.relSemitones > 0 ? "+" : ""}
-                        {s.relSemitones.toFixed(1)} st · {Math.round(s.hz)} Hz)
+                        Target {TONE_INFO[s.target].label} ({TONE_INFO[s.target].solfa}) · detected{" "}
+                        {TONE_INFO[s.detected].label} ({TONE_INFO[s.detected].solfa})
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Pitch {Math.round(s.hz)} Hz · {i === 0 ? "starting anchor" : `${s.deltaSemitones >= 0 ? "+" : ""}${s.deltaSemitones.toFixed(1)} st from previous`}
                       </p>
                     </div>
                   </div>

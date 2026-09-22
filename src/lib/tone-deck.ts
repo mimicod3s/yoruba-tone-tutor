@@ -11,9 +11,9 @@ export type ToneWord = {
 };
 
 export const TONE_INFO: Record<Tone, { label: string; mark: string; solfa: string; semitone: number }> = {
-  H: { label: "High", mark: "Ó", solfa: "Do", semitone: 4 },
+  H: { label: "High", mark: "Ó", solfa: "Mí", semitone: 4 },
   M: { label: "Mid", mark: "O", solfa: "Re", semitone: 0 },
-  L: { label: "Low", mark: "Ò", solfa: "Mi", semitone: -4 },
+  L: { label: "Low", mark: "Ò", solfa: "Dò", semitone: -4 },
 };
 
 export const DECK: ToneWord[] = [

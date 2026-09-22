@@ -15,6 +15,7 @@ export function usePitchRecorder() {
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef(0);
+  const smoothedHzRef = useRef(0);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -25,6 +26,7 @@ export function usePitchRecorder() {
     setStatus("idle");
     setLevel(0);
     setLiveHz(0);
+    smoothedHzRef.current = 0;
     return samplesRef.current;
   }, []);
 
@@ -48,6 +50,7 @@ export function usePitchRecorder() {
       const buf = new Float32Array(analyser.fftSize);
       samplesRef.current = [];
       baselineRef.current = null;
+      smoothedHzRef.current = 0;
       const t0 = performance.now();
 
       const tick = () => {
@@ -59,7 +62,8 @@ export function usePitchRecorder() {
         const hz = detectPitch(buf, ctx.sampleRate);
         samplesRef.current.push({ t: performance.now() - t0, hz });
         if (hz > 0) {
-          setLiveHz(Math.round(hz));
+          smoothedHzRef.current = smoothedHzRef.current ? smoothedHzRef.current * 0.72 + hz * 0.28 : hz;
+          setLiveHz(Math.round(smoothedHzRef.current));
           const voiced = samplesRef.current.filter((s) => s.hz > 0).map((s) => s.hz);
           if (voiced.length >= 5) baselineRef.current = median(voiced);
         }
